@@ -11,7 +11,7 @@ from googleapiclient.errors import HttpError
 from google.cloud import vision
 
 # === Authenticate ===
-st.title("📂 Persona Builder — Multi-Format with OCR")
+st.title("📂 Persona Builder — Multi-Format with PNG OCR Timeout")
 
 creds = service_account.Credentials.from_service_account_info(st.secrets["gcp"])
 drive_service = build("drive", "v3", credentials=creds)
@@ -36,17 +36,27 @@ def list_all_files(folder_id):
 def safe_parse_pptx(fh):
     def parse():
         prs = Presentation(fh)
-        text = []
-        for slide in prs.slides:
-            for shape in slide.shapes:
-                if hasattr(shape, "text"):
-                    content = shape.text.strip()
-                    if content:
-                        text.append(content)
-        return "\n".join(text)
+        return "\n".join(
+            shape.text.strip()
+            for slide in prs.slides
+            for shape in slide.shapes
+            if hasattr(shape, "text") and shape.text.strip()
+        )
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(parse)
+        return future.result(timeout=5)
+
+# === Timeout-Safe PNG OCR via Vision API ===
+def safe_ocr_png(image_bytes):
+    def ocr():
+        image = vision.Image(content=image_bytes)
+        response = vision_client.text_detection(image=image)
+        annotations = response.text_annotations
+        return annotations[0].description.strip() if annotations else ""
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(ocr)
         return future.result(timeout=5)
 
 # === Start App ===
@@ -70,7 +80,6 @@ else:
             fh = io.BytesIO()
 
             if mime.startswith("application/vnd.google-apps"):
-                # === Google-native Export Handling ===
                 export_mime = {
                     "application/vnd.google-apps.document": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     "application/vnd.google-apps.spreadsheet": "text/csv",
@@ -111,16 +120,17 @@ else:
                     continue
 
             elif file_name.lower().endswith(".png") and mime.startswith("image/"):
-                st.write(f"🖼️ Running OCR on {file_name}...")
-                image_content = fh.read()
-                image = vision.Image(content=image_content)
-                response = vision_client.text_detection(image=image)
-                annotations = response.text_annotations
-                if annotations:
-                    text = annotations[0].description.strip()
-                    st.success(f"✅ OCR complete: {file_name}")
-                else:
-                    st.warning(f"⚪ No text found in {file_name}")
+                try:
+                    st.write(f"🖼️ Running OCR on {file_name}...")
+                    image_content = fh.read()
+                    text = safe_ocr_png(image_content)
+                    if text:
+                        st.success(f"✅ OCR complete: {file_name}")
+                    else:
+                        st.warning(f"⚪ No text found in {file_name}")
+                        continue
+                except TimeoutError:
+                    st.warning(f"⏱️ Skipped {file_name} (OCR timeout)")
                     continue
 
             else:
