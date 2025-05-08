@@ -37,6 +37,11 @@ try:
             mime = file["mimeType"]
             st.write(f"📄 Processing `{file_name}`")
 
+            # Skip Google-native formats (Docs, Sheets, Slides)
+            if mime.startswith("application/vnd.google-apps."):
+                st.warning(f"⏭️ Skipping Google-native file: {file_name}")
+                continue
+
             request = drive_service.files().get_media(fileId=file_id)
             fh = io.BytesIO()
             downloader = MediaIoBaseDownload(fh, request)
