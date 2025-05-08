@@ -37,7 +37,10 @@ def list_all_files(folder_id):
     return all_files
 
 try:
-    files = list_all_files(FOLDER_ID)
+    files = list_all_files(FOLDER_ID)[:3]  # Limit to first 3 files for testing
+    st.write("📦 Files to be processed:")
+    for f in files:
+        st.write(f["name"], f["mimeType"])
 
     if not files:
         st.warning("No files found in the folder tree.")
@@ -84,13 +87,13 @@ try:
                     df = pd.read_excel(fh, nrows=100)  # limit rows
                     st.dataframe(df.head())
                     text = df.to_csv(index=False)
+                # Temporarily skip PDFs and Word Docs for debugging
                 elif mime in ["application/pdf"] or file_name.endswith(".pdf"):
-                    pdf = fitz.open(stream=fh.read(), filetype="pdf")
-                    pages = [page.get_text() for i, page in enumerate(pdf) if i < 5]  # limit pages
-                    text = "\n".join(pages)
+                    st.warning(f"⏭️ Skipping PDF file: {file_name}")
+                    continue
                 elif mime in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.google-apps.document"] or file_name.endswith(".docx"):
-                    doc = docx.Document(fh)
-                    text = "\n".join([p.text for p in doc.paragraphs[:50]])  # limit paragraphs
+                    st.warning(f"⏭️ Skipping Word file: {file_name}")
+                    continue
                 elif mime in ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.google-apps.presentation"] or file_name.endswith(".pptx"):
                     prs = Presentation(fh)
                     slides = []
@@ -104,7 +107,7 @@ try:
                     st.warning(f"⏭️ Unsupported or unexportable file: {file_name} ({mime})")
                     continue
 
-                all_texts.append(f"\n---\n# {file_name}\n{text.strip()[:2000]}\n")  # limit text size
+                all_texts.append(f"\n---\n# {file_name}\n{text.strip()[:2000]}\n")
                 st.write(f"✅ Finished: {file_name}")
 
             except HttpError as e:
@@ -123,3 +126,4 @@ try:
 
 except HttpError as e:
     st.error(f"Drive API error: {e}")
+
