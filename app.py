@@ -5,7 +5,6 @@ import fitz  # PyMuPDF
 import docx
 from pptx import Presentation
 from PIL import Image
-import pytesseract
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
