@@ -9,16 +9,19 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 from google.cloud import vision
+import openai
 
-# === Authenticate ===
-st.title("📂 Persona Builder — Multi-Format with PNG OCR Timeout")
+# === Setup & Auth ===
+st.title("📂 Persona Builder — Multi-Format + GPT")
 
 creds = service_account.Credentials.from_service_account_info(st.secrets["gcp"])
 drive_service = build("drive", "v3", credentials=creds)
 vision_client = vision.ImageAnnotatorClient(credentials=creds)
+openai.api_key = st.secrets["openai_api_key"]
+
 FOLDER_ID = "1QBUwWvuaLvJrie3cblt8d4ch9cyaogWg"
 
-# === Recursively List Drive Files ===
+# === List Files Recursively ===
 def list_all_files(folder_id):
     query = f"'{folder_id}' in parents"
     results = drive_service.files().list(q=query, pageSize=100, fields="files(id, name, mimeType)").execute()
@@ -32,7 +35,7 @@ def list_all_files(folder_id):
             all_files.append(item)
     return all_files
 
-# === Timeout-Safe PPTX Parser ===
+# === Timeout-Safe Parsers ===
 def safe_parse_pptx(fh):
     def parse():
         prs = Presentation(fh)
@@ -42,32 +45,29 @@ def safe_parse_pptx(fh):
             for shape in slide.shapes
             if hasattr(shape, "text") and shape.text.strip()
         )
-
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(parse)
         return future.result(timeout=5)
 
-# === Timeout-Safe PNG OCR via Vision API ===
 def safe_ocr_png(image_bytes):
     def ocr():
         image = vision.Image(content=image_bytes)
         response = vision_client.text_detection(image=image)
         annotations = response.text_annotations
         return annotations[0].description.strip() if annotations else ""
-
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(ocr)
         return future.result(timeout=5)
 
-# === Start App ===
+# === Main Parser Logic ===
 st.write("🔍 Scanning Google Drive folder...")
 files = list_all_files(FOLDER_ID)
+all_texts = []
 
 if not files:
     st.warning("No files found.")
 else:
     st.success(f"✅ Found {len(files)} files.")
-    all_texts = []
 
     for file in files:
         file_id = file["id"]
@@ -85,11 +85,9 @@ else:
                     "application/vnd.google-apps.spreadsheet": "text/csv",
                     "application/vnd.google-apps.presentation": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 }.get(mime)
-
                 if not export_mime:
                     st.warning(f"⏭️ Skipping unsupported Google-native file: {file_name}")
                     continue
-
                 request = drive_service.files().export_media(fileId=file_id, mimeType=export_mime)
             else:
                 request = drive_service.files().get_media(fileId=file_id)
@@ -116,7 +114,7 @@ else:
                 try:
                     text = safe_parse_pptx(fh)
                 except TimeoutError:
-                    st.warning(f"⏱️ Skipped {file_name} (pptx parse timeout)")
+                    st.warning(f"⏱️ Skipped {file_name} (pptx timeout)")
                     continue
 
             elif file_name.lower().endswith(".png") and mime.startswith("image/"):
@@ -134,7 +132,7 @@ else:
                     continue
 
             else:
-                st.warning(f"⏭️ Skipping unknown file type: {file_name}")
+                st.warning(f"⏭️ Skipping unsupported type: {file_name}")
                 continue
 
             if text.strip():
@@ -146,10 +144,48 @@ else:
         except Exception as e:
             st.error(f"❌ Error processing {file_name}: {e}")
 
-    combined = "\n\n".join(all_texts)
-    st.session_state["persona_input_text"] = combined
-    st.write(f"📊 Parsed content from {len(all_texts)} file(s)")
-    st.text_area("📄 Combined Extracted Text", value=combined[:3000], height=300)
+# === Display and Store ===
+combined = "\n\n".join(all_texts)
+st.session_state["persona_input_text"] = combined
+st.write(f"📊 Parsed content from {len(all_texts)} file(s)")
+st.text_area("📄 Combined Extracted Text", value=combined[:3000], height=300)
+
+# === GPT Persona Generator ===
+GPT_SYSTEM_PROMPT = """
+You are a senior marketing strategist trained in audience research and persona development.
+
+Based on the following content from research documents, slides, and planning inputs, generate a marketing persona including:
+- First name (fictional)
+- Age range
+- Occupation/title
+- Demographics (location, gender if inferred)
+- Psychographics (attitudes, beliefs, motivations)
+- Media habits
+- Buying or decision behavior
+
+Return the result as a structured persona profile using bullet points.
+"""
+
+if st.button("🤖 Generate Persona with GPT"):
+    if not st.session_state.get("persona_input_text"):
+        st.warning("No input text available.")
+    else:
+        with st.spinner("Generating persona..."):
+            try:
+                response = openai.ChatCompletion.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": GPT_SYSTEM_PROMPT},
+                        {"role": "user", "content": st.session_state["persona_input_text"][:8000]}
+                    ],
+                    temperature=0.7,
+                    max_tokens=800
+                )
+                output = response["choices"][0]["message"]["content"]
+                st.markdown("### 🧠 Generated Persona")
+                st.markdown(output)
+            except Exception as e:
+                st.error(f"GPT error: {e}")
 
 
 
