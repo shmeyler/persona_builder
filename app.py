@@ -14,7 +14,7 @@ creds = service_account.Credentials.from_service_account_info(st.secrets["gcp"])
 drive_service = build("drive", "v3", credentials=creds)
 
 FOLDER_ID = "1QBUwWvuaLvJrie3cblt8d4ch9cyaogWg"  # Your root folder ID
-st.title("📂 GPT Persona Ingestion: Recursive Google Drive Parser")
+st.title("📂 GPT Persona Ingestion: Recursive Google Drive Parser (Testing .pptx only)")
 
 # Recursive function to gather all file metadata from a folder and its subfolders
 def list_all_files(folder_id):
@@ -55,23 +55,16 @@ try:
             fh = io.BytesIO()
 
             try:
-                if mime == "application/vnd.google-apps.document":
-                    request = drive_service.files().export_media(
-                        fileId=file_id,
-                        mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
-                elif mime == "application/vnd.google-apps.spreadsheet":
-                    request = drive_service.files().export_media(
-                        fileId=file_id,
-                        mimeType="text/csv"
-                    )
-                elif mime == "application/vnd.google-apps.presentation":
+                if mime == "application/vnd.google-apps.presentation":
                     request = drive_service.files().export_media(
                         fileId=file_id,
                         mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
-                else:
+                elif mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation" or file_name.endswith(".pptx"):
                     request = drive_service.files().get_media(fileId=file_id)
+                else:
+                    st.warning(f"⏭️ Skipping non-pptx file: {file_name} ({mime})")
+                    continue
 
                 downloader = MediaIoBaseDownload(fh, request)
                 done = False
@@ -79,33 +72,14 @@ try:
                     _, done = downloader.next_chunk()
                 fh.seek(0)
 
-                if mime in ["text/csv", "application/vnd.google-apps.spreadsheet"] or file_name.endswith(".csv"):
-                    df = pd.read_csv(fh, nrows=100)  # limit rows
-                    st.dataframe(df.head())
-                    text = df.to_csv(index=False)
-                elif file_name.endswith(".xlsx") or mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-                    df = pd.read_excel(fh, nrows=100)  # limit rows
-                    st.dataframe(df.head())
-                    text = df.to_csv(index=False)
-                # Temporarily skip PDFs and Word Docs for debugging
-                elif mime in ["application/pdf"] or file_name.endswith(".pdf"):
-                    st.warning(f"⏭️ Skipping PDF file: {file_name}")
-                    continue
-                elif mime in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.google-apps.document"] or file_name.endswith(".docx"):
-                    st.warning(f"⏭️ Skipping Word file: {file_name}")
-                    continue
-                elif mime in ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.google-apps.presentation"] or file_name.endswith(".pptx"):
-                    prs = Presentation(fh)
-                    slides = []
-                    for i, slide in enumerate(prs.slides):
-                        if i >= 5: break  # limit slides
-                        for shape in slide.shapes:
-                            if hasattr(shape, "text"):
-                                slides.append(shape.text)
-                    text = "\n".join(slides)
-                else:
-                    st.warning(f"⏭️ Unsupported or unexportable file: {file_name} ({mime})")
-                    continue
+                prs = Presentation(fh)
+                slides = []
+                for i, slide in enumerate(prs.slides):
+                    if i >= 5: break  # limit slides
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text"):
+                            slides.append(shape.text)
+                text = "\n".join(slides)
 
                 all_texts.append(f"\n---\n# {file_name}\n{text.strip()[:2000]}\n")
                 st.write(f"✅ Finished: {file_name}")
@@ -121,7 +95,7 @@ try:
         full_text = "\n\n".join(all_texts)
         st.session_state["persona_input_text"] = full_text
 
-        st.success("✅ All supported files parsed from folder tree and ready for GPT!")
+        st.success("✅ PPTX-only test completed")
         st.text_area("📄 Preview", full_text[:3000], height=250)
 
 except HttpError as e:
