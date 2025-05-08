@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import io
-import fitz  # PyMuPDF
 import docx
 from pptx import Presentation
 from google.oauth2 import service_account
