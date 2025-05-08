@@ -8,3 +8,4 @@ PyMuPDF
 python-docx
 python-pptx
 
+openpyxl
