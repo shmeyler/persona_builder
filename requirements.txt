@@ -4,3 +4,7 @@ google-auth
 google-auth-oauthlib
 google-auth-httplib2
 google-api-python-client
+PyMuPDF
+python-docx
+python-pptx
+
