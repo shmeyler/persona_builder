@@ -4,6 +4,8 @@ import io
 import fitz  # PyMuPDF
 import docx
 from pptx import Presentation
+from PIL import Image
+import pytesseract
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -67,17 +69,8 @@ try:
                         fileId=file_id,
                         mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
-                elif mime == "application/pdf" or file_name.endswith(".pdf"):
-                    request = drive_service.files().get_media(fileId=file_id)
-                elif mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or file_name.endswith(".docx"):
-                    request = drive_service.files().get_media(fileId=file_id)
-                elif mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation" or file_name.endswith(".pptx"):
-                    request = drive_service.files().get_media(fileId=file_id)
-                elif mime == "text/csv" or file_name.endswith(".csv"):
-                    request = drive_service.files().get_media(fileId=file_id)
                 else:
-                    st.warning(f"⏭️ Unsupported or unexportable file: {file_name} ({mime})")
-                    continue
+                    request = drive_service.files().get_media(fileId=file_id)
 
                 downloader = MediaIoBaseDownload(fh, request)
                 done = False
@@ -87,6 +80,10 @@ try:
 
                 if mime in ["text/csv", "application/vnd.google-apps.spreadsheet"] or file_name.endswith(".csv"):
                     df = pd.read_csv(fh)
+                    st.dataframe(df.head())
+                    text = df.to_csv(index=False)
+                elif file_name.endswith(".xlsx") or mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+                    df = pd.read_excel(fh)
                     st.dataframe(df.head())
                     text = df.to_csv(index=False)
                 elif mime in ["application/pdf"] or file_name.endswith(".pdf"):
@@ -103,8 +100,12 @@ try:
                             if hasattr(shape, "text"):
                                 slides.append(shape.text)
                     text = "\n".join(slides)
+                elif file_name.lower().endswith(".png") and mime.startswith("image/"):
+                    image = Image.open(fh)
+                    text = pytesseract.image_to_string(image)
                 else:
-                    text = "(Unsupported file type — skipped)"
+                    st.warning(f"⏭️ Unsupported or unexportable file: {file_name} ({mime})")
+                    continue
 
                 all_texts.append(f"\n---\n# {file_name}\n{text.strip()[:5000]}\n")
 
