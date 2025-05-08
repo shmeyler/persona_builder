@@ -2,26 +2,28 @@ import streamlit as st
 import pandas as pd
 import io
 from pptx import Presentation
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 
-# === Google Drive Authentication ===
-st.title("📂 Persona Builder - PowerPoint Parser")
+# === App Title ===
+st.title("📂 Persona Builder — Safe PPTX Parser with Timeout")
 
+# === Authenticate with Google Drive ===
 creds = service_account.Credentials.from_service_account_info(st.secrets["gcp"])
 drive_service = build("drive", "v3", credentials=creds)
 
-FOLDER_ID = "1QBUwWvuaLvJrie3cblt8d4ch9cyaogWg"  # Replace with your actual folder ID
+# === Set Folder ID ===
+FOLDER_ID = "1QBUwWvuaLvJrie3cblt8d4ch9cyaogWg"
 
-# === Helper: Recursively collect all files ===
+# === Recursively List All Files ===
 def list_all_files(folder_id):
     query = f"'{folder_id}' in parents"
     results = drive_service.files().list(q=query, pageSize=100, fields="files(id, name, mimeType)").execute()
     items = results.get("files", [])
     all_files = []
-
     for item in items:
         if item["mimeType"] == "application/vnd.google-apps.folder":
             st.write(f"📁 Entering folder: {item['name']}")
@@ -30,16 +32,33 @@ def list_all_files(folder_id):
             all_files.append(item)
     return all_files
 
-# === File Listing ===
+# === Safe .pptx Parsing with Timeout ===
+def safe_parse_pptx(fh):
+    def parse():
+        prs = Presentation(fh)
+        text = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, "text"):
+                    content = shape.text.strip()
+                    if content:
+                        text.append(content)
+        return "\n".join(text)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(parse)
+        return future.result(timeout=5)
+
+# === Load Files ===
 st.write("🔍 Scanning Google Drive folder...")
-files = list_all_files(FOLDER_ID)[:3]  # Limit for now
+files = list_all_files(FOLDER_ID)[:3]
 
 if not files:
     st.warning("No files found.")
 else:
-    st.success(f"✅ Found {len(files)} files. Processing...")
-
+    st.success(f"✅ Found {len(files)} files.")
     all_texts = []
+
     for file in files:
         file_id = file["id"]
         file_name = file["name"]
@@ -48,7 +67,7 @@ else:
         st.write(f"📄 Processing: {file_name} ({mime})")
 
         if not (file_name.endswith(".pptx") or "presentation" in mime):
-            st.warning(f"⏭️ Skipping unsupported file: {file_name}")
+            st.info(f"⏭️ Skipping unsupported file: {file_name}")
             continue
 
         try:
@@ -60,31 +79,22 @@ else:
                 _, done = downloader.next_chunk()
             fh.seek(0)
 
-            prs = Presentation(fh)
-            slides = []
-            for slide in prs.slides:
-                for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        text_content = shape.text.strip()
-                        if text_content:
-                            slides.append(text_content)
-                            st.write(f"🧠 Found text in {file_name}: {text_content[:100]}...")
-                        else:
-                            st.write(f"⚪ Empty shape in {file_name}")
-
-            text = "\n".join(slides)
+            text = safe_parse_pptx(fh)
             if text:
                 all_texts.append(f"\n---\n# {file_name}\n{text}")
-                st.success(f"✅ Parsed content from: {file_name}")
+                st.success(f"✅ Parsed: {file_name}")
             else:
-                st.warning(f"⚠️ No usable text found in: {file_name}")
+                st.warning(f"⚠️ No text found in: {file_name}")
 
+        except TimeoutError:
+            st.error(f"⏱️ Skipped {file_name} — parsing timed out.")
         except Exception as e:
-            st.error(f"❌ Failed to process {file_name}: {e}")
+            st.error(f"❌ Error processing {file_name}: {e}")
 
-    # Combine and preview
-    st.write(f"📊 Combined {len(all_texts)} content blocks")
-    full_text = "\n\n".join(all_texts)
-    st.session_state["persona_input_text"] = full_text
-    st.text_area("📄 Combined Extracted Text", value=full_text[:3000], height=300)
+    # === Combine and Show Output ===
+    combined = "\n\n".join(all_texts)
+    st.session_state["persona_input_text"] = combined
+    st.write(f"📊 Parsed content from {len(all_texts)} file(s)")
+    st.text_area("📄 Combined Extracted Text", value=combined[:3000], height=300)
+
 
