@@ -6,7 +6,7 @@ import docx
 from pptx import Presentation
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 
 # Authenticate
@@ -21,7 +21,7 @@ query = f"'{FOLDER_ID}' in parents"
 try:
     results = drive_service.files().list(
         q=query,
-        pageSize=20,
+        pageSize=50,
         fields="files(id, name, mimeType)"
     ).execute()
 
@@ -41,40 +41,49 @@ try:
 
             try:
                 if mime == "application/vnd.google-apps.document":
-                    # Export Google Doc to .docx
-                    request = drive_service.files().export_media(fileId=file_id,
-                        mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                    downloader = MediaIoBaseDownload(fh, request)
+                    request = drive_service.files().export_media(
+                        fileId=file_id,
+                        mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
                 elif mime == "application/vnd.google-apps.spreadsheet":
-                    # Export Google Sheet to CSV
-                    request = drive_service.files().export_media(fileId=file_id, mimeType="text/csv")
-                    downloader = MediaIoBaseDownload(fh, request)
+                    request = drive_service.files().export_media(
+                        fileId=file_id,
+                        mimeType="text/csv"
+                    )
                 elif mime == "application/vnd.google-apps.presentation":
-                    # Export Google Slides to .pptx
-                    request = drive_service.files().export_media(fileId=file_id,
-                        mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation")
-                    downloader = MediaIoBaseDownload(fh, request)
-                else:
-                    # All other binary files
+                    request = drive_service.files().export_media(
+                        fileId=file_id,
+                        mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    )
+                elif mime == "application/pdf" or file_name.endswith(".pdf"):
                     request = drive_service.files().get_media(fileId=file_id)
-                    downloader = MediaIoBaseDownload(fh, request)
+                elif mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or file_name.endswith(".docx"):
+                    request = drive_service.files().get_media(fileId=file_id)
+                elif mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation" or file_name.endswith(".pptx"):
+                    request = drive_service.files().get_media(fileId=file_id)
+                elif mime == "text/csv" or file_name.endswith(".csv"):
+                    request = drive_service.files().get_media(fileId=file_id)
+                else:
+                    st.warning(f"⏭️ Unsupported or unexportable file: {file_name} ({mime})")
+                    continue
 
+                downloader = MediaIoBaseDownload(fh, request)
                 done = False
                 while not done:
                     _, done = downloader.next_chunk()
                 fh.seek(0)
 
-                if file_name.endswith(".csv") or mime == "application/vnd.google-apps.spreadsheet":
+                if mime in ["text/csv", "application/vnd.google-apps.spreadsheet"] or file_name.endswith(".csv"):
                     df = pd.read_csv(fh)
                     st.dataframe(df.head())
                     text = df.to_csv(index=False)
-                elif file_name.endswith(".pdf"):
+                elif mime in ["application/pdf"] or file_name.endswith(".pdf"):
                     pdf = fitz.open(stream=fh.read(), filetype="pdf")
                     text = "\n".join([page.get_text() for page in pdf])
-                elif file_name.endswith(".docx") or mime == "application/vnd.google-apps.document":
+                elif mime in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.google-apps.document"] or file_name.endswith(".docx"):
                     doc = docx.Document(fh)
                     text = "\n".join([p.text for p in doc.paragraphs])
-                elif file_name.endswith(".pptx") or mime == "application/vnd.google-apps.presentation":
+                elif mime in ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.google-apps.presentation"] or file_name.endswith(".pptx"):
                     prs = Presentation(fh)
                     slides = []
                     for slide in prs.slides:
@@ -87,8 +96,13 @@ try:
 
                 all_texts.append(f"\n---\n# {file_name}\n{text.strip()[:5000]}")
 
+            except HttpError as e:
+                if e.resp.status == 403:
+                    st.warning(f"⛔ Skipping unexportable Google file: {file_name}")
+                else:
+                    st.error(f"❌ Failed to process {file_name}: {e}")
             except Exception as e:
-                st.error(f"❌ Failed to process {file_name}: {e}")
+                st.error(f"❌ Unexpected error for {file_name}: {e}")
 
         full_text = "\n\n".join(all_texts)
         st.session_state["persona_input_text"] = full_text
@@ -98,6 +112,3 @@ try:
 
 except HttpError as e:
     st.error(f"Drive API error: {e}")
-
-
-
