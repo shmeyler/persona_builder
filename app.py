@@ -4,7 +4,6 @@ import io
 import fitz  # PyMuPDF
 import docx
 from pptx import Presentation
-from PIL import Image
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -78,35 +77,35 @@ try:
                 fh.seek(0)
 
                 if mime in ["text/csv", "application/vnd.google-apps.spreadsheet"] or file_name.endswith(".csv"):
-                    df = pd.read_csv(fh)
+                    df = pd.read_csv(fh, nrows=100)  # limit rows
                     st.dataframe(df.head())
                     text = df.to_csv(index=False)
                 elif file_name.endswith(".xlsx") or mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-                    df = pd.read_excel(fh)
+                    df = pd.read_excel(fh, nrows=100)  # limit rows
                     st.dataframe(df.head())
                     text = df.to_csv(index=False)
                 elif mime in ["application/pdf"] or file_name.endswith(".pdf"):
                     pdf = fitz.open(stream=fh.read(), filetype="pdf")
-                    text = "\n".join([page.get_text() for page in pdf])
+                    pages = [page.get_text() for i, page in enumerate(pdf) if i < 5]  # limit pages
+                    text = "\n".join(pages)
                 elif mime in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.google-apps.document"] or file_name.endswith(".docx"):
                     doc = docx.Document(fh)
-                    text = "\n".join([p.text for p in doc.paragraphs])
+                    text = "\n".join([p.text for p in doc.paragraphs[:50]])  # limit paragraphs
                 elif mime in ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.google-apps.presentation"] or file_name.endswith(".pptx"):
                     prs = Presentation(fh)
                     slides = []
-                    for slide in prs.slides:
+                    for i, slide in enumerate(prs.slides):
+                        if i >= 5: break  # limit slides
                         for shape in slide.shapes:
                             if hasattr(shape, "text"):
                                 slides.append(shape.text)
                     text = "\n".join(slides)
-                elif file_name.lower().endswith(".png") and mime.startswith("image/"):
-                    image = Image.open(fh)
-                    text = pytesseract.image_to_string(image)
                 else:
                     st.warning(f"⏭️ Unsupported or unexportable file: {file_name} ({mime})")
                     continue
 
-                all_texts.append(f"\n---\n# {file_name}\n{text.strip()[:5000]}\n")
+                all_texts.append(f"\n---\n# {file_name}\n{text.strip()[:2000]}\n")  # limit text size
+                st.write(f"✅ Finished: {file_name}")
 
             except HttpError as e:
                 if e.resp.status == 403:
@@ -120,7 +119,7 @@ try:
         st.session_state["persona_input_text"] = full_text
 
         st.success("✅ All supported files parsed from folder tree and ready for GPT!")
-        st.text_area("📄 Combined Extracted Content", full_text[:15000], height=300)
+        st.text_area("📄 Preview", full_text[:3000], height=250)
 
 except HttpError as e:
     st.error(f"Drive API error: {e}")
