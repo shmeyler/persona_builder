@@ -6,7 +6,7 @@ import docx
 from pptx import Presentation
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 
 # Authenticate
@@ -37,31 +37,44 @@ try:
             mime = file["mimeType"]
             st.write(f"📄 Processing `{file_name}`")
 
-            # Skip Google-native formats (Docs, Sheets, Slides)
-            if mime.startswith("application/vnd.google-apps."):
-                st.warning(f"⏭️ Skipping Google-native file: {file_name}")
-                continue
-
-            request = drive_service.files().get_media(fileId=file_id)
             fh = io.BytesIO()
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while not done:
-                _, done = downloader.next_chunk()
-            fh.seek(0)
 
             try:
-                if file_name.endswith(".csv"):
+                if mime == "application/vnd.google-apps.document":
+                    # Export Google Doc to .docx
+                    request = drive_service.files().export_media(fileId=file_id,
+                        mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                    downloader = MediaIoBaseDownload(fh, request)
+                elif mime == "application/vnd.google-apps.spreadsheet":
+                    # Export Google Sheet to CSV
+                    request = drive_service.files().export_media(fileId=file_id, mimeType="text/csv")
+                    downloader = MediaIoBaseDownload(fh, request)
+                elif mime == "application/vnd.google-apps.presentation":
+                    # Export Google Slides to .pptx
+                    request = drive_service.files().export_media(fileId=file_id,
+                        mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+                    downloader = MediaIoBaseDownload(fh, request)
+                else:
+                    # All other binary files
+                    request = drive_service.files().get_media(fileId=file_id)
+                    downloader = MediaIoBaseDownload(fh, request)
+
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+                fh.seek(0)
+
+                if file_name.endswith(".csv") or mime == "application/vnd.google-apps.spreadsheet":
                     df = pd.read_csv(fh)
                     st.dataframe(df.head())
                     text = df.to_csv(index=False)
                 elif file_name.endswith(".pdf"):
                     pdf = fitz.open(stream=fh.read(), filetype="pdf")
                     text = "\n".join([page.get_text() for page in pdf])
-                elif file_name.endswith(".docx"):
+                elif file_name.endswith(".docx") or mime == "application/vnd.google-apps.document":
                     doc = docx.Document(fh)
                     text = "\n".join([p.text for p in doc.paragraphs])
-                elif file_name.endswith(".pptx"):
+                elif file_name.endswith(".pptx") or mime == "application/vnd.google-apps.presentation":
                     prs = Presentation(fh)
                     slides = []
                     for slide in prs.slides:
