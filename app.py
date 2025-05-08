@@ -13,7 +13,7 @@ st.title("📂 Persona Builder - PowerPoint Parser")
 creds = service_account.Credentials.from_service_account_info(st.secrets["gcp"])
 drive_service = build("drive", "v3", credentials=creds)
 
-FOLDER_ID = "1QBUwWvuaLvJrie3cblt8d4ch9cyaogWg"  # replace with your actual folder ID
+FOLDER_ID = "1QBUwWvuaLvJrie3cblt8d4ch9cyaogWg"  # Replace with your actual folder ID
 
 # === Helper: Recursively collect all files ===
 def list_all_files(folder_id):
@@ -32,7 +32,7 @@ def list_all_files(folder_id):
 
 # === File Listing ===
 st.write("🔍 Scanning Google Drive folder...")
-files = list_all_files(FOLDER_ID)[:3]  # Limit to 3 files for testing
+files = list_all_files(FOLDER_ID)[:3]  # Limit for now
 
 if not files:
     st.warning("No files found.")
@@ -47,13 +47,11 @@ else:
 
         st.write(f"📄 Processing: {file_name} ({mime})")
 
-        # Skip everything except pptx
         if not (file_name.endswith(".pptx") or "presentation" in mime):
             st.warning(f"⏭️ Skipping unsupported file: {file_name}")
             continue
 
         try:
-            # Download
             request = drive_service.files().get_media(fileId=file_id)
             fh = io.BytesIO()
             downloader = MediaIoBaseDownload(fh, request)
@@ -62,22 +60,31 @@ else:
                 _, done = downloader.next_chunk()
             fh.seek(0)
 
-            # Parse .pptx
             prs = Presentation(fh)
             slides = []
             for slide in prs.slides:
                 for shape in slide.shapes:
                     if hasattr(shape, "text"):
-                        slides.append(shape.text)
-            text = "\n".join(slides)
+                        text_content = shape.text.strip()
+                        if text_content:
+                            slides.append(text_content)
+                            st.write(f"🧠 Found text in {file_name}: {text_content[:100]}...")
+                        else:
+                            st.write(f"⚪ Empty shape in {file_name}")
 
-            all_texts.append(f"\n---\n# {file_name}\n{text}")
-            st.success(f"✅ Parsed: {file_name}")
+            text = "\n".join(slides)
+            if text:
+                all_texts.append(f"\n---\n# {file_name}\n{text}")
+                st.success(f"✅ Parsed content from: {file_name}")
+            else:
+                st.warning(f"⚠️ No usable text found in: {file_name}")
 
         except Exception as e:
             st.error(f"❌ Failed to process {file_name}: {e}")
 
     # Combine and preview
+    st.write(f"📊 Combined {len(all_texts)} content blocks")
     full_text = "\n\n".join(all_texts)
     st.session_state["persona_input_text"] = full_text
     st.text_area("📄 Combined Extracted Text", value=full_text[:3000], height=300)
+
