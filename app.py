@@ -13,22 +13,34 @@ from googleapiclient.errors import HttpError
 creds = service_account.Credentials.from_service_account_info(st.secrets["gcp"])
 drive_service = build("drive", "v3", credentials=creds)
 
-FOLDER_ID = "1QBUwWvuaLvJrie3cblt8d4ch9cyaogWg"  # Your shared folder ID
-st.title("📂 GPT Persona Ingestion: Multi-Format Drive Parser")
+FOLDER_ID = "1QBUwWvuaLvJrie3cblt8d4ch9cyaogWg"  # Your root folder ID
+st.title("📂 GPT Persona Ingestion: Recursive Google Drive Parser")
 
-query = f"'{FOLDER_ID}' in parents"
+# Recursive function to gather all file metadata from a folder and its subfolders
+def list_all_files(folder_id):
+    all_files = []
+    try:
+        query = f"'{folder_id}' in parents"
+        results = drive_service.files().list(
+            q=query,
+            pageSize=100,
+            fields="files(id, name, mimeType)"
+        ).execute()
+
+        for file in results.get("files", []):
+            if file["mimeType"] == "application/vnd.google-apps.folder":
+                all_files.extend(list_all_files(file["id"]))  # recurse into subfolder
+            else:
+                all_files.append(file)
+    except Exception as e:
+        st.error(f"Error accessing folder {folder_id}: {e}")
+    return all_files
 
 try:
-    results = drive_service.files().list(
-        q=query,
-        pageSize=50,
-        fields="files(id, name, mimeType)"
-    ).execute()
-
-    files = results.get("files", [])
+    files = list_all_files(FOLDER_ID)
 
     if not files:
-        st.warning("No files found in the folder.")
+        st.warning("No files found in the folder tree.")
     else:
         all_texts = []
         for file in files:
@@ -94,7 +106,7 @@ try:
                 else:
                     text = "(Unsupported file type — skipped)"
 
-                all_texts.append(f"\n---\n# {file_name}\n{text.strip()[:5000]}")
+                all_texts.append(f"\n---\n# {file_name}\n{text.strip()[:5000]}\n")
 
             except HttpError as e:
                 if e.resp.status == 403:
@@ -107,7 +119,7 @@ try:
         full_text = "\n\n".join(all_texts)
         st.session_state["persona_input_text"] = full_text
 
-        st.success("✅ All supported files parsed and ready for GPT!")
+        st.success("✅ All supported files parsed from folder tree and ready for GPT!")
         st.text_area("📄 Combined Extracted Content", full_text[:15000], height=300)
 
 except HttpError as e:
