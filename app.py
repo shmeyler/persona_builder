@@ -1,33 +1,4 @@
 import streamlit as st
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-
-# Authenticate
-creds = service_account.Credentials.from_service_account_info(st.secrets["gcp"])
-drive_service = build("drive", "v3", credentials=creds)
-
-st.title("📁 Google Drive Connection Test")
-
-try:
-    # Try to list any 5 files shared with the service account
-    results = drive_service.files().list(
-        pageSize=5,
-        fields="files(id, name)"
-    ).execute()
-
-    files = results.get("files", [])
-
-    if not files:
-        st.warning("✅ Connected, but no shared files found.")
-    else:
-        st.success("✅ Successfully connected to Google Drive!")
-        for file in files:
-            st.write(f"📄 {file['name']} ({file['id']})")
-
-except HttpError as error:
-    st.error(f"🚨 Google Drive API error:\n{error}")
-import streamlit as st
 import pandas as pd
 import io
 import fitz  # PyMuPDF
@@ -96,7 +67,7 @@ try:
                 else:
                     text = "(Unsupported file type — skipped)"
 
-                all_texts.append(f"\n---\n# {file_name}\n{text.strip()[:5000]}")  # Truncate if needed
+                all_texts.append(f"\n---\n# {file_name}\n{text.strip()[:5000]}")
 
             except Exception as e:
                 st.error(f"❌ Failed to process {file_name}: {e}")
@@ -109,5 +80,6 @@ try:
 
 except HttpError as e:
     st.error(f"Drive API error: {e}")
+
 
 
